@@ -1,0 +1,32 @@
+; ************************************************************
+; PROJECT:
+; AUTHOR:
+; ************************************************************
+
+; Micro + software running
+; ------------------------------------------------------------
+.MICRO "ATmega8"
+.PROGRAM "kurs.asm"
+.TARGET "kurs.hex"
+
+.TRACE              ; Activate micro trace
+
+; Following lines are optional; if not included
+; exactly these values are taken by default
+; ------------------------------------------------------------
+.POWER VDD=5 VSS=0  ; Power nodes
+.CLOCK 2meg         ; Micro clock
+.STORE 250m         ; Trace (micro+signals) storage time
+
+; Micro nodes: RESET, AREF, PB0-PB7, PC0-PC6, PD0-PD7, ACO, TIM1OVF, ADC6, ADC7
+; Define here the hardware around the micro
+; ------------------------------------------------------------
+
+R4 VDD PC4 4.7k
+R3 VDD PC5 4.7k
+X2 I2C(100k 18) PC4 PC5
+
+R2 PB2 node2 1k
+D2 VDD node2
+R1 PB1 node1 1k
+D1 VDD node1

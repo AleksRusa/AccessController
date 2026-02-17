@@ -1,0 +1,388 @@
+.include "D:\PROGRA~1\VMLAB\include\m8def.inc"
+
+; Ð¾Ð¿Ñ€ÐµÐ´ÐµÐ»ÐµÐ½Ð¸Ðµ Ð¿ÐµÑ€ÐµÐ¼ÐµÐ½Ð½Ñ‹Ñ…
+.def temp = R16
+.def data = r17
+.def code = r19
+.def codes_amount = r18
+.def counter_1s = r21
+.def seconds_flag = r4
+.def counter_sec = r23
+.def led_state = r24
+.def sys = r22
+
+
+.equ d1_activate = 2
+.equ d2_activate = 3
+.equ deactivate = 4
+.equ d1_d2_activate = 5
+.equ d1_blink = 6
+.equ START_CODE = 0x08
+.equ SLAVE_ADDR = 0x12
+.equ MASTER_CODE_ADDR = 0x00
+.equ CODES_AMOUNT_ADDR = 0x40
+
+
+; Ð²ÐµÐºÑ‚Ð¾Ñ€Ð° Ð¿Ñ€ÐµÑ€Ñ‹Ð²Ð°Ð½Ð¸Ð¹
+reset:
+	rjmp start
+	.org 0x009
+	rjmp TIMER0_OVF
+	.org 0x11
+	rjmp TWI_ISR
+
+; Ð·Ð°Ð³Ñ€ÑƒÐ·ÐºÐ° Ð²ÑÐµÑ… Ð½ÐµÐ¾Ð±Ñ…Ð¾Ð´Ð¸Ð¼Ñ‹Ñ… Ð±Ð¸Ñ‚Ð¾Ð² Ð² Ñ€ÐµÐ³Ð¸ÑÑ‚Ñ€Ñ‹, Ð¸Ð½Ð¸Ñ†Ð¸Ð°Ð»Ð¸Ð·Ð°Ñ†Ð¸Ñ
+start:
+	ldi temp, high(RAMEND)
+	out sph,temp
+	ldi temp,low(RAMEND)
+	out spl, temp
+
+	ldi r16, 2
+	out TWBR, r16
+	ldi r17, (0<<TWPS1)|(0<<TWPS0)
+	out TWSR, r17
+
+
+	LDI R16, 0xFF
+	OUT PORTB, R16
+	OUT DDRB, R16
+	
+	OUT PORTD, R16
+	CLR R16
+	OUT DDRD, R16
+	CLR sys
+
+
+	cli
+	ldi temp, 0b00000001
+	out TIMSK, temp
+	out TIFR, temp
+
+
+	clr codes_amount
+	clr r16
+	clr r25
+	ldi r26, CODES_AMOUNT_ADDR
+	clr r27
+	rcall EEPROM_read
+	clr r26
+	mov codes_amount, r16
+	cpi r16, 60
+	brlo load_60_codes
+	cpi r16, 65
+	brsh load_60_codes
+	rjmp twi_init
+
+twi_init:
+	ldi temp, (SLAVE_ADDR << 1)
+	out TWAR, temp
+	ldi r16, (1<<TWEN) | (1<<TWIE) | (1<<TWEA)
+	out TWCR, r16
+	sei
+
+; Ð¾ÑÐ½Ð¾Ð²Ð½Ð¾Ð¹ Ñ†Ð¸ÐºÐ»
+main:
+	cpi sys, d1_activate
+	breq wait_5s_d1
+	cpi sys, d2_activate
+	breq wait_5s_d2
+	cpi sys, d1_d2_activate
+	breq wait_15s_handler
+
+	cpi sys, d1_blink
+	breq handle_blink
+
+	rjmp main
+
+
+; Ð·Ð°Ð³Ñ€ÑƒÐ·ÐºÐ° ÐºÐ¾Ð´Ð¾Ð²
+load_60_codes:
+	cpi r26, 60
+	breq set_codes_amount
+	rcall EEPROM_write
+	inc codes_amount
+	inc r26
+	inc r25
+	rjmp load_60_codes
+
+
+set_codes_amount:
+	clr codes_amount
+	ldi r25, 0x3C
+	mov codes_amount, r25
+	dec r25
+	ldi r26, CODES_AMOUNT_ADDR
+	rcall EEPROM_write
+	rjmp twi_init
+
+; ÐºÐ¾Ð»Ð±ÑÐº Ñ„ÑƒÐ½ÐºÑ†Ð¸Ð¸ Ð²Ñ‹Ð·Ñ‹Ð²Ð°ÐµÐ¼Ñ‹Ðµ Ð¸Ð· Ð¿Ñ€ÐµÑ€Ñ‹Ð²Ð°Ð½Ð¸Ð¹
+wait_5s_d1:
+	tst seconds_flag
+	breq exit
+	clr seconds_flag
+	inc counter_sec
+	cpi counter_sec, 5
+	brlo exit
+
+	sbi PORTB, PB1
+	ldi sys, deactivate
+	rcall stop_timer
+	rjmp main
+
+wait_5s_d2:
+	tst seconds_flag
+	breq exit
+	clr seconds_flag
+	inc counter_sec
+	cpi counter_sec, 5
+	brlo exit
+
+	sbi PORTB, PB2
+	ldi sys, deactivate
+	rcall stop_timer
+	rjmp main
+
+wait_15s_handler:
+	tst seconds_flag
+	breq exit
+
+	clr seconds_flag
+	inc counter_sec
+
+	cpi counter_sec, 15
+	brlo exit
+
+	sbi PORTB, PB1
+	sbi PORTB, PB2
+	
+	ldi sys, deactivate
+	rcall stop_timer
+	rjmp main
+
+handle_blink:
+	tst seconds_flag
+	breq exit
+
+	clr seconds_flag
+	inc counter_sec
+
+	ldi temp, 1
+	eor led_state, temp
+	breq turn_off
+
+turn_on:
+	cbi PORTB, PB1
+	rjmp check_time
+
+
+turn_off:
+	sbi PORTB, PB1
+
+
+check_time:
+	cpi counter_sec, 5
+	brlo exit
+	sbi PORTB, PB1
+	rcall stop_timer
+	ldi sys, deactivate
+	rjmp main
+
+exit:
+	rjmp main
+
+
+; Ð¾Ð±Ñ€Ð°Ð±Ð¾Ñ‚ÐºÐ° Ð¿Ñ€ÐµÑ€Ñ‹Ð²Ð°Ð½Ð¸Ð¹
+TWI_ISR:
+	push temp
+	in temp, SREG
+	push temp
+	in r16, TWSR
+	andi r16, 0b11111000
+
+
+	cpi r16, 0x60
+	breq slave_addr_rx
+	cpi r16, 0x80
+	breq slave_data_rx
+	cpi r16, 0xA0
+	breq stop_receiving
+
+
+	rjmp twi_exit
+
+
+	slave_addr_rx:
+	ldi temp, (1<<TWEN) | (1<<TWIE) | (1<<TWEA) | (1<<TWINT)
+	out TWCR, temp
+	rjmp twi_exit
+	
+slave_data_rx:
+	in code, TWDR
+	rcall process_card_code
+	ldi temp, (1<<TWEN) | (1<<TWIE) | (1<<TWEA) | (1<<TWINT)
+	out TWCR, temp
+	rjmp twi_exit
+
+stop_receiving:
+	ldi temp, (1<<TWEN) | (1<<TWIE) | (1<<TWEA) | (1<<TWINT)
+	out TWCR, temp
+
+
+twi_exit:
+	pop temp
+	out SREG, temp
+	pop temp
+	reti
+
+
+; Ð¾Ð±Ñ€Ð°Ð±Ð¾Ñ‚ÐºÐ° ÐºÐ¾Ð´Ð° ÐºÐ°Ñ€Ñ‚Ñ‹
+process_card_code:
+	cpi sys, d1_d2_activate
+	breq process_new_code_special
+
+
+	rcall check_master_code
+
+
+	ldi r26, 0x01
+	ldi r27, 0x00
+	mov r28, codes_amount
+	rcall find_code
+	ret
+
+
+process_new_code_special:
+	rcall process_new_code
+	reti
+
+check_master_code:
+	ldi r26, MASTER_CODE_ADDR
+	rcall EEPROM_read
+	cp r16, code
+	brne check_master_exit
+
+
+	mov r25, codes_amount
+	cpi r25, 64
+	breq blink_light
+	rjmp wait_code_15s
+
+check_master_exit:
+	ret
+
+; Ñ„ÑƒÐ½ÐºÑ†Ð¸Ð¸ Ð·Ð°Ð¿ÑƒÑÐºÐ° Ð´Ð¸Ð¾Ð´Ð¾Ð²
+blink_light:
+	sbi PORTB, PB1
+	sbi PORTB, PB2
+	ldi sys, d1_blink
+	clr counter_sec
+	clr led_state
+	rcall start_timer
+	pop temp
+	pop temp
+	ret
+
+diod_1_on:
+	ldi sys, d1_activate
+	sbi PORTB, PB2
+	cbi PORTB, PB1
+	clr counter_sec
+	rcall start_timer
+	ret
+
+diod_2_on:
+	ldi sys, d2_activate
+	sbi PORTB, PB1
+	cbi PORTB, PB2
+	clr counter_sec
+	rcall start_timer
+	ret
+
+; Ð¾Ð¶Ð¸Ð´Ð°Ð½Ð¸Ðµ Ð¿ÐµÑ€ÐµÐ´Ð°Ñ‡Ð¸ Ð½Ð¾Ð²Ð¾Ð³Ð¾ ÐºÐ¾Ð´Ð°
+wait_code_15s:
+	ldi sys, d1_d2_activate
+	cbi PORTB, PB1
+	cbi PORTB, PB2
+	clr counter_sec
+	rcall start_timer
+	pop temp
+	pop temp
+	ret
+
+; Ð¿Ð¾Ð¸ÑÐº ÐºÐ¾Ð´Ð° Ð² EEPROM
+find_code:
+	cp r28, r26
+	breq diod_1_on
+	rcall EEPROM_read
+	cp r16, code
+	breq diod_2_on
+	inc r26
+	rjmp find_code
+
+
+; Ð¾Ð±Ñ€Ð°Ð±Ð¾Ñ‚ÐºÐ° Ð½Ð¾Ð²Ð¾Ð³Ð¾ ÐºÐ¾Ð´Ð°
+process_new_code:
+		clr r27
+	mov r26, codes_amount
+	mov r25, code
+	rcall EEPROM_write
+	inc codes_amount
+	mov r25, codes_amount
+	ldi r26, CODES_AMOUNT_ADDR
+	rcall EEPROM_write
+
+
+	sbi PORTB, PB1
+	sbi PORTB, PB2
+	rcall stop_timer
+	ldi sys, deactivate
+	ret
+
+; Ñ„ÑƒÐ½ÐºÑ†Ð¸Ð¸ Ñ€Ð°Ð±Ð¾Ñ‚Ñ‹ Ñ EEPROM
+EEPROM_write:
+	sbic EECR, EEWE
+	rjmp EEPROM_write
+	out EEARH, r27
+	out EEARL, r26
+	out EEDR, r25
+	sbi EECR, EEMWE
+	sbi EECR, EEWE
+	ret
+
+
+EEPROM_read:
+	sbic EECR, EEWE
+	rjmp EEPROM_read
+	out EEARH, r27
+	out EEARL, r26
+	sbi EECR,EERE
+	in r16, EEDR
+	ret
+
+; Ñ„ÑƒÐ½ÐºÑ†Ð¸Ð¸ Ñ€Ð°Ð±Ð¾Ñ‚Ñ‹ Ñ Ñ‚Ð°Ð¹Ð¼ÐµÑ€Ð¾Ð¼
+start_timer:
+	ldi temp, (1 << CS02) | (1 << CS00)
+	out TCCR0, temp
+	clr counter_sec
+	clr counter_1s
+	clr seconds_flag
+	sei
+	ret
+
+
+stop_timer:
+	ldi temp, 0
+	out TCCR0, temp
+	reti
+
+TIMER0_OVF:
+	INC counter_1s
+	CPI counter_1s, 8
+	BRNE timer_end
+	CLR counter_1s
+	INC seconds_flag
+	
+timer_end:
+	RETI
+
